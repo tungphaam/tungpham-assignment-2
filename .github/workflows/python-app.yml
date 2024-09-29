@@ -20,6 +20,7 @@ jobs:
             python -m venv venv
             source venv/bin/activate
             make install
-        - name: Run tests
+        - name: Run app on port 3000
           run: |
-            make run
+            make run &
+            sleep 5 # wait for the server to start
