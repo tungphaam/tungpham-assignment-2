@@ -1,12 +1,538 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>KMeans Clustering Web App</title>
-    </head>
-    <body>
-        <h1>KMeans Clustering Algorithm</h1>
-            <p>This is a simple placeholder for the UI.</p>
-    </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KMeans Clustering Algorithm</title>
+    <style>
+        /* Center the entire content */
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            min-height: 100vh;
+            text-align: center;
+        }
+
+        /* Center the form and buttons horizontally */
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        /* Center the output plot */
+        #output {
+            margin: 0 auto;
+        }
+
+        h2, h1 {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>KMeans Clustering Algorithm</h1>
+
+    <div class="controls">
+        <form id="kmeans-form">
+            <label for="k">Number of Clusters (k):</label>
+            <input type="number" id="k" name="k" min="2" required>
+            
+            <label for="init_method">Initialization Method:</label>
+            <select id="init_method" name="init_method">
+                <option value="random">Random</option>
+                <option value="farthest_first">Farthest First</option>
+                <option value="kmeans++">KMeans++</option>
+                <option value="manual">Manual (Click on plot)</option>
+            </select>
+        </form>    
+    </div>
+
+    <!-- Group all the buttons including Run to Convergence in a div -->
+    <div class="button-group">
+        <button id="step-through">Step Through KMeans</button>
+        <button id="run-to-convergence">Run to Convergence</button>
+        <button id="generate-dataset">Generate New Dataset</button>
+        <button id="reset-algorithm">Reset Algorithm</button>
+    </div>
+
+    <h2>Results</h2>
+    <div id="output"></div>
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+    <script>
+    let dataPoints = [];
+    let manualCentroids = [];
+    let currentCentroids = [];
+    let steps = [];
+    let currentStep = 0;
+    let initialDataPoints = [];
+
+    // Function to generate and store the initial blue data points
+    function generateInitialBlueDataPoints() {
+        // Generate random points only if the initialDataPoints array is empty (first time)
+        if (initialDataPoints.length === 0) {
+            dataPoints = Array.from({ length: 300 }, () => [Math.random() * 20 - 10, Math.random() * 20 - 10]);
+            initialDataPoints = [...dataPoints]; // Save a copy of the original dataset for future resets
+        } else {
+            // Reset to the original dataset (if already generated)
+            dataPoints = [...initialDataPoints];
+        }
+
+        // Plot the initial points
+        let trace1 = {
+            x: dataPoints.map(point => point[0]),
+            y: dataPoints.map(point => point[1]),
+            mode: 'markers',
+            marker: { size: 5, color: 'lightblue' },  
+            name: 'Data Points'
+        };
+
+        let layout = {
+            title: 'KMeans Clustering Data',
+            xaxis: { 
+                title: 'X',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10]
+            },
+            yaxis: { 
+                title: 'Y',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10] 
+            },
+            autosize: true,
+            width: window.innerWidth * 0.8,
+            height: window.innerHeight * 0.7,
+            margin: { t: 50, b: 50, l: 50, r: 50 },
+            responsive: true
+        };
+
+        Plotly.newPlot('output', [trace1], layout);
+    }
+
+    // Reset Algorithm button functionality
+    document.getElementById('reset-algorithm').addEventListener('click', function() {
+        // Clear the steps, centroids, and reset the current step
+        steps = [];
+        manualCentroids = [];  
+        currentCentroids = [];
+        currentStep = 0;
+
+        // Reset the visuals to the original dataset 
+        generateInitialBlueDataPoints(); 
+
+        // Get the initialization method
+        const init_method = document.getElementById('init_method').value;
+
+        // Re-enable the Step Through button only if it's not manual
+        if (init_method !== 'manual') {
+            document.getElementById('step-through').disabled = false;
+            document.getElementById('run-to-convergence').disabled = false;
+        } else {
+            document.getElementById('step-through').disabled = true;
+            document.getElementById('run-to-convergence').disabled = true;
+        }
+
+        // Re-enable manual centroid selection if the manual method is selected
+        if (document.getElementById('init_method').value === 'manual') {
+            alert('Please click on the plot to select centroids manually.');
+            plotDataset();  // Rebind the event listeners for selecting centroids
+        }
+
+        console.log('Algorithm and visual state reset to step 0 (only data points, no centroids).');
+    });
+
+
+    document.getElementById('kmeans-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        const k = document.getElementById('k').value;
+        const init_method = document.getElementById('init_method').value;
+
+        // Clear previous output and display loading message
+        let output = document.getElementById('output');
+        //output.innerHTML = `<h3>Running KMeans...</h3>`;
+
+        // If manual, wait for user input
+        if (init_method == 'manual') {
+            alert('Please click on the plot to select centroids manually.');
+            plotDataset(); // Plot the dataset so the user can select centroids
+        } else {
+            runKMeans(k, init_method);
+        }
+    });
+
+    document.getElementById('step-through').addEventListener('click', function() {
+        if (steps.length === 0) {
+            // Store the current state of the data points before running KMeans
+            initialDataPoints = [...dataPoints];  // Save the current dataset right before step-through
+
+            // Fetch steps from the backend if not already fetched
+            const k = document.getElementById('k').value;
+            const init_method = document.getElementById('init_method').value;
+
+            fetch('/step_through_kmeans', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ k: k, init_method: init_method, data: initialDataPoints })
+            })
+            .then(response => response.json())
+            .then(data => {
+                steps = data.steps;
+                dataPoints = data.data;
+                currentStep = 0; 
+                console.log("Steps after reset and KMeans run:", steps);
+                stepThroughKMeans();
+            })
+            .catch(error => {
+                console.error('Error during step-through:', error);
+            });
+        } else {
+            stepThroughKMeans();
+        }
+    });
+
+    document.getElementById('run-to-convergence').addEventListener('click', function(event) {
+        event.preventDefault();  // Prevent the form from submitting
+
+        const k = document.getElementById('k').value;
+        const init_method = document.getElementById('init_method').value;
+
+        // If steps already fetched, just show the final step
+        if (steps.length > 0) {
+            currentStep = steps.length - 1;
+            plotStep(currentStep);
+        } else {
+            // Otherwise, fetch and run KMeans
+            runKMeans(k, init_method);
+        }
+    });
+
+
+    // Step through each KMeans step
+    function stepThroughKMeans() {
+        if (steps.length === 0) {
+            alert('No steps available to visualize. Please run KMeans first.');
+            return;
+        }
+
+        // If we have already reached the final step
+        if (currentStep >= steps.length) {
+            alert('Already reached the final step!');
+            return;
+        }
+
+        // If there are steps, proceed
+        if (currentStep < steps.length) {
+            console.log(`Plotting step ${currentStep + 1} of ${steps.length}`);
+            Plotly.purge('output');
+            plotStep(currentStep);
+            currentStep++;
+            
+            // Check if we've reached the final step
+            if (currentStep === steps.length) {
+                alert('Reached the final step!');
+                document.getElementById('step-through').disabled = true;
+            }
+        }
+    }
+
+    function plotStep(stepIndex) {
+        const step = steps[stepIndex]; // Get the current step data
+        console.log(`Plotting step ${stepIndex + 1} out of ${steps.length}`);
+
+        // Data points (colored by the clusters they belong to in the current step)
+        let trace1 = {
+            x: initialDataPoints.map(point => point[0]),  // Use initial data points for consistency
+            y: initialDataPoints.map(point => point[1]),
+            mode: 'markers',
+            marker: { size: 5, color: step.clusters },  // step.clusters contains the color coding
+            name: 'Data Points'
+        };
+
+        // Centroids for the current step
+        let trace2 = {
+            x: step.centroids.map(centroid => centroid[0]),
+            y: step.centroids.map(centroid => centroid[1]),
+            mode: 'markers',
+            marker: { size: 12, color: 'red', symbol: 'x' },  // Centroids are marked as red X's
+            name: 'Centroids'
+        };
+
+        let layout = {
+            title: 'KMeans Clustering Animation',
+            xaxis: { 
+                title: 'X',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10] // Adjust range to match your data scale
+            },
+            yaxis: { 
+                title: 'Y',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10] // Adjust range to match your data scale
+            },
+            autosize: true,
+            width: window.innerWidth * 0.8,
+            height: window.innerHeight * 0.7,
+            margin: { t: 50, b: 50, l: 50, r: 50 },
+            responsive: true
+        };
+
+        // Plot the current step using Plotly.react to avoid clearing the entire plot
+        Plotly.react('output', [trace1, trace2], layout);
+    }
+
+    function plotDataset() {
+        // Disable the Step Through and Run to Convergence buttons initially
+        document.getElementById('step-through').disabled = true;
+        document.getElementById('run-to-convergence').disabled = true;
+
+        // Plot the dataset with blue points
+        let trace1 = {
+            x: dataPoints.map(point => point[0]),
+            y: dataPoints.map(point => point[1]),
+            mode: 'markers',
+            marker: { size: 5, color: 'lightblue' },
+            name: 'Data Points'
+        };
+
+        let layout = {
+            title: 'Select Centroids',
+            xaxis: { title: 'X', range: [-10, 10] },
+            yaxis: { title: 'Y', range: [-10, 10] },
+            width: window.innerWidth * 0.8,
+            height: window.innerHeight * 0.7,
+            margin: { t: 50, b: 50, l: 50, r: 50 },
+            responsive: true
+        };
+
+        // Initial plot
+        Plotly.newPlot('output', [trace1], layout);
+
+        // Listen for click events on the plot
+        document.getElementById('output').on('plotly_click', function(data) {
+            let x = data.points[0].x;
+            let y = data.points[0].y;
+
+            // Add the clicked point as a centroid
+            manualCentroids.push([x, y]);
+
+            // Log selected centroids for debugging
+            console.log('Selected Centroid:', x, y);
+
+            // Plot the selected centroids as red X markers
+            let centroidTrace = {
+                x: manualCentroids.map(centroid => centroid[0]),
+                y: manualCentroids.map(centroid => centroid[1]),
+                mode: 'markers',
+                marker: { size: 12, color: 'red', symbol: 'x' },
+                name: 'Centroid'
+            };
+
+            // Update the plot to show the selected centroids
+            Plotly.react('output', [trace1, centroidTrace], layout);
+
+            // Check if the required number of centroids has been selected
+            if (manualCentroids.length === parseInt(document.getElementById('k').value)) {
+                document.getElementById('step-through').disabled = false;
+                document.getElementById('run-to-convergence').disabled = false;
+
+                // All centroids are selected, run the manual KMeans algorithm
+                runManualKMeans();
+            }
+        });
+    }
+
+    function runManualKMeans() {
+        fetch('/run_manual_kmeans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ centroids: manualCentroids, data: dataPoints })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error("Network response was not ok");
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log("Manual KMeans data received:", data);
+            steps = data.steps;  // Store the steps for step-through functionality
+            dataPoints = data.data;  // Store the data points
+            
+            // Start stepping through the KMeans process
+            currentStep = 0;
+            stepThroughKMeans();
+        })
+        .catch(error => {
+            console.error('Error running manual KMeans:', error);
+        });
+    }
+
+
+    // Run KMeans for other methods
+    function runKMeans(k, init_method) {
+        // Ensure dataPoints already exists
+        if (dataPoints.length === 0) {
+            console.error('No dataset available. Please generate a dataset first.');
+            return;
+        }
+
+        const requestData = {
+            k: k,
+            init_method: init_method,
+            data: dataPoints,
+            centroids: currentCentroids.length > 0 ? currentCentroids : null // Reuse centroids if available
+        };
+
+        fetch('/run_kmeans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestData)
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error("Network response was not ok");
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log("Received data from backend:", data); 
+            currentCentroids = data.centroids;  // Store the centroids for future reuse
+            steps = data.steps;
+            plotFinalClusters(data);
+            document.getElementById('step-through').disabled = false;
+        })
+        .catch(error => {
+            console.error('Error running KMeans:', error);
+        });
+    }
+
+
+    function plotFinalClusters(data) {
+        let trace1 = {
+            x: data.data.map(point => point[0]),
+            y: data.data.map(point => point[1]),
+            mode: 'markers',
+            marker: { size: 5, color: data.clusters },
+            name: 'Data Points'
+        };
+
+        let trace2 = {
+            x: data.centroids.map(centroid => centroid[0]),
+            y: data.centroids.map(centroid => centroid[1]),
+            mode: 'markers',
+            marker: { size: 12, color: 'red', symbol: 'x'},
+            name: 'Centroids'
+        };
+
+        let layout = {
+            title: 'KMeans Clustering - Final Results',
+            xaxis: { 
+                title: 'X',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10]
+            },
+            yaxis: { 
+                title: 'Y',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10] 
+            },
+            autosize: true,
+            width: window.innerWidth * 0.8,
+            height: window.innerHeight * 0.7,
+            margin: { t: 50, b: 50, l: 50, r: 50},
+            responsive: true
+        };
+
+        Plotly.newPlot('output', [trace1, trace2], layout);
+    }
+
+    // Generate New Dataset button functionality
+    document.getElementById('generate-dataset').addEventListener('click', function() {
+        // Generate a new random dataset and plot it
+        dataPoints = Array.from({ length: 300 }, () => [Math.random() * 20 - 10, Math.random() * 20 - 10]);
+        initialDataPoints = [...dataPoints]; 
+
+        // Plot the new dataset
+        let trace1 = {
+            x: dataPoints.map(point => point[0]),
+            y: dataPoints.map(point => point[1]),
+            mode: 'markers',
+            marker: { size: 5, color: 'lightblue' },  
+            name: 'Data Points'
+        };
+
+        let layout = {
+            title: 'New Random Dataset',
+            xaxis: { 
+                title: 'X',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10]
+            },
+            yaxis: { 
+                title: 'Y',
+                zeroline: true,
+                zerolinecolor: '#000',
+                showgrid: false,
+                range: [-10, 10] 
+            },
+            autosize: true,
+            width: window.innerWidth * 0.8,
+            height: window.innerHeight * 0.7,
+            margin: { t: 50, b: 50, l: 50, r: 50 },
+            responsive: true
+        };
+
+        Plotly.newPlot('output', [trace1], layout);
+
+        // Reset the Step Through button and other state variables
+        steps = [];
+        manualCentroids = [];
+        currentCentroids = [];
+        currentStep = 0;
+
+        console.log('Generated a new dataset and updated the visual.');
+    });
+
+    // When the page loads, show the initial blue points
+    window.onload = function() {
+        generateInitialBlueDataPoints();
+    };
+
+    document.getElementById('init_method').addEventListener('change', function(event) {
+        selectedMethod = event.target.value;
+        
+        // Check if manual mode is selected
+        if (selectedMethod === 'manual') {
+            manualCentroids = [];
+            // Clear the plot and allow the user to select new centroids
+            //document.getElementById('output').innerHTML = '<h3>Select centroids by clicking on the plot</h3>';
+            
+            // Re-plot the dataset and enable clicking for manual centroids
+            plotDataset();
+        }
+    });
+
+    </script>
+
+</body>
 </html>
