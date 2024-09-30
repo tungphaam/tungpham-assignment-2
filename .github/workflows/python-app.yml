@@ -1,34 +1,34 @@
 name: Python application
 
 on:
-    push:
-        branches: [main]
+  push:
+    branches: [main]
 
 jobs:
-    build:
-        runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
 
-        steps:
-        - uses: actions/checkout@v2
+    steps:
+    - uses: actions/checkout@v2
 
-        - name: Set up Python 3.8
-          uses: actions/setup-python@v2
-          with:
-            python-version: 3.8
+    # Set up Python 3.8
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
 
-        - name: Install dependencies
-          run: |
-            python -m venv venv
-            source venv/bin/activate
-            pip install --upgrade pip
-            make install
+    # Create virtual environment and install dependencies
+    - name: Install dependencies
+      run: |
+        make venv
+        . venv/bin/activate && make install
 
-        - name: Run app on port 3000
-          run: |
-            source venv/bin/activate
-            make run &
-            sleep 5 # wait for the server to start
+    # Run Flask app on port 3000
+    - name: Run app on port 3000
+      run: |
+        . venv/bin/activate && make run &
+        sleep 10  # Allow time for server to start
 
-        - name: Check if server is running
-          run: |
-            curl --fail http://localhost:3000 || exit 1
+    # Check if app is running
+    - name: Test server
+      run: curl --fail http://localhost:3000 || exit 1
