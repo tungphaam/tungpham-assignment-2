@@ -3,7 +3,7 @@ venv:
 	python3 -m venv venv
 
 # Install dependencies inside the virtual environment
-install:
+install: venv
 	. venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt
 
 # Run the application on port 3000
@@ -15,6 +15,6 @@ clean:
 	rm -rf venv
 
 # Full setup to create virtual environment, install dependencies, and run the app
-setup:
-	make venv && make install && make run
+setup: venv install run
+
 
